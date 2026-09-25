@@ -33,8 +33,7 @@ const PLATFORMS: { value: Platform; label: string }[] = [
   { value: 'ios', label: 'iOS' },
 ];
 
-// حداکثر حجم فایل: ۵۰ مگابایت برای پلن رایگان Supabase
-const MAX_FILE_SIZE = 50 * 1024 * 1024;
+const MAX_FILE_SIZE = 200 * 1024 * 1024; // 200 مگابایت
 
 export default function UploadPage() {
   const router = useRouter();
@@ -129,7 +128,6 @@ export default function UploadPage() {
       } = await supabase.auth.getUser();
       if (!user) throw new Error('لطفاً دوباره وارد شوید');
 
-      // گرفتن session برای توکن دسترسی
       const {
         data: { session },
       } = await supabase.auth.getSession();
@@ -165,7 +163,7 @@ export default function UploadPage() {
         .from('games')
         .getPublicUrl(coverPath);
 
-      // ۳. آپلود فایل بازی با TUS (اگر وجود داره)
+      // ۳. آپلود فایل بازی با TUS
       let filePath: string | null = null;
       let fileSize: number | null = null;
 
@@ -177,18 +175,7 @@ export default function UploadPage() {
         filePath = `files/${user.id}/${slug}.${fileExt}`;
         fileSize = gameFile.size;
 
-        // ساخت signed upload URL و گرفتن توکن
-        const { data: uploadData, error: uploadError } = await supabase.storage
-          .from('games')
-          .createSignedUploadUrl(filePath);
-
-        if (uploadError || !uploadData) {
-          throw new Error('خطا در ساخت لینک آپلود: ' + (uploadError?.message || 'نامشخص'));
-        }
-
-        setUploadStage('در حال آپلود فایل بازی...');
-
-        // استخراج project ID از URL Supabase
+        // استخراج Project ID از URL Supabase
         const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
         const projectId = supabaseUrl.match(/https:\/\/([^.]+)\./)?.[1];
 
@@ -196,11 +183,13 @@ export default function UploadPage() {
           throw new Error('Project ID یافت نشد');
         }
 
-        // آپلود با TUS - استفاده از endpoint مستقیم storage
+        setUploadStage('در حال آپلود فایل بازی...');
+
+        // آپلود با TUS - endpoint مستقیم
         await new Promise<void>((resolve, reject) => {
           const upload = new tus.Upload(gameFile, {
             endpoint: `https://${projectId}.storage.supabase.co/storage/v1/upload/resumable`,
-            retryDelays: [0, 1000, 3000, 5000, 10000],
+            retryDelays: [0, 3000, 5000, 10000, 20000],
             headers: {
               authorization: `Bearer ${session.access_token}`,
               'x-upsert': 'true',
