@@ -33,6 +33,9 @@ const PLATFORMS: { value: Platform; label: string }[] = [
   { value: 'ios', label: 'iOS' },
 ];
 
+// حداکثر حجم فایل: ۵۰ مگابایت برای پلن رایگان Supabase
+const MAX_FILE_SIZE = 50 * 1024 * 1024;
+
 export default function UploadPage() {
   const router = useRouter();
   const supabase = createClient();
@@ -84,6 +87,21 @@ export default function UploadPage() {
     reader.readAsDataURL(file);
   };
 
+  const handleGameFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > MAX_FILE_SIZE) {
+      setError(
+        `حجم فایل بازی باید کمتر از ${MAX_FILE_SIZE / 1024 / 1024} مگابایت باشد. فایل شما ${(file.size / 1024 / 1024).toFixed(1)} مگابایت است.`
+      );
+      return;
+    }
+
+    setError(null);
+    setGameFile(file);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -111,6 +129,12 @@ export default function UploadPage() {
       } = await supabase.auth.getUser();
       if (!user) throw new Error('لطفاً دوباره وارد شوید');
 
+      // گرفتن session برای توکن دسترسی
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session) throw new Error('لطفاً دوباره وارد شوید');
+
       // ۱. ساخت slug یکتا
       const baseSlug =
         titleEn
@@ -121,7 +145,7 @@ export default function UploadPage() {
 
       const slug = `${baseSlug}-${Math.random().toString(36).substring(2, 6)}`;
 
-      // ۲. آپلود کاور
+      // ۲. آپلود کاور (ساده)
       setUploadStage('آپلود تصویر کاور...');
       setUploadProgress(0);
 
@@ -153,7 +177,7 @@ export default function UploadPage() {
         filePath = `files/${user.id}/${slug}.${fileExt}`;
         fileSize = gameFile.size;
 
-        // ساخت signed upload URL
+        // ساخت signed upload URL و گرفتن توکن
         const { data: uploadData, error: uploadError } = await supabase.storage
           .from('games')
           .createSignedUploadUrl(filePath);
@@ -164,20 +188,32 @@ export default function UploadPage() {
 
         setUploadStage('در حال آپلود فایل بازی...');
 
-        // آپلود با TUS
+        // استخراج project ID از URL Supabase
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+        const projectId = supabaseUrl.match(/https:\/\/([^.]+)\./)?.[1];
+
+        if (!projectId) {
+          throw new Error('Project ID یافت نشد');
+        }
+
+        // آپلود با TUS - استفاده از endpoint مستقیم storage
         await new Promise<void>((resolve, reject) => {
           const upload = new tus.Upload(gameFile, {
-            uploadUrl: uploadData.signedUrl,
+            endpoint: `https://${projectId}.storage.supabase.co/storage/v1/upload/resumable`,
             retryDelays: [0, 1000, 3000, 5000, 10000],
             headers: {
+              authorization: `Bearer ${session.access_token}`,
               'x-upsert': 'true',
             },
+            uploadDataDuringCreation: true,
+            removeFingerprintOnSuccess: true,
             metadata: {
               bucketName: 'games',
               objectName: filePath!,
               contentType: gameFile.type || 'application/octet-stream',
               cacheControl: '3600',
             },
+            chunkSize: 6 * 1024 * 1024, // باید ۶ مگابایت باشه
             onError: (err) => {
               console.error('TUS upload error:', err);
               reject(new Error('خطا در آپلود فایل: ' + err.message));
@@ -416,7 +452,7 @@ export default function UploadPage() {
           {(platforms.includes('windows') || platforms.includes('android')) && (
             <Field
               label="فایل بازی"
-              hint="فرمت‌های مجاز: ZIP, APK, EXE, RAR, 7Z"
+              hint="حداکثر ۵۰ مگابایت - ZIP, APK, EXE, RAR, 7Z"
               required
             >
               <label
@@ -440,7 +476,7 @@ export default function UploadPage() {
                 <input
                   type="file"
                   accept=".zip,.apk,.exe,.rar,.7z"
-                  onChange={(e) => setGameFile(e.target.files?.[0] || null)}
+                  onChange={handleGameFileChange}
                   style={{ display: 'none' }}
                   disabled={loading}
                 />
@@ -452,7 +488,7 @@ export default function UploadPage() {
                   marginTop: '0.5rem',
                 }}
               >
-                فایل‌های بزرگ به صورت خودکار تکه‌تکه آپلود می‌شوند و در صورت قطعی، ادامه پیدا می‌کنند.
+                فایل‌های بزرگ به صورت تکه‌تکه آپلود می‌شوند و در صورت قطعی، ادامه پیدا می‌کنند.
               </p>
             </Field>
           )}
