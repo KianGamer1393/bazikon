@@ -18,26 +18,20 @@ export async function updateSession(request: NextRequest) {
           );
           supabaseResponse = NextResponse.next({ request });
           cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
+            supabaseResponse.cookies.set(name, value, {
+              ...options,
+              path: '/',
+              sameSite: 'lax',
+              secure: process.env.NODE_ENV === 'production',
+            })
           );
         },
       },
     }
   );
 
-  const { data: { user } } = await supabase.auth.getUser();
-
-  // محافظت از مسیرهای حساس
-  const protectedPaths = ['/dashboard', '/upload'];
-  const isProtected = protectedPaths.some(p =>
-    request.nextUrl.pathname.startsWith(p)
-  );
-
-  if (isProtected && !user) {
-    const url = request.nextUrl.clone();
-    url.pathname = '/login';
-    return NextResponse.redirect(url);
-  }
+  // این خط خیلی مهمه - توکن رو رفرش می‌کنه
+  await supabase.auth.getUser();
 
   return supabaseResponse;
 }

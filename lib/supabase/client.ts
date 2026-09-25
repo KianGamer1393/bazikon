@@ -6,10 +6,10 @@ export function createClient() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookieOptions: {
-        domain: undefined, // خودش دامنه فعلی رو انتخاب می‌کنه
         path: '/',
         sameSite: 'lax',
-        secure: true,
+        secure: process.env.NODE_ENV === 'production',
+        maxAge: 60 * 60 * 24 * 7, // ۷ روز
       },
     }
   );
