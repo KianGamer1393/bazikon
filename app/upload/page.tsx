@@ -33,7 +33,7 @@ const PLATFORMS: { value: Platform; label: string }[] = [
   { value: 'ios', label: 'iOS' },
 ];
 
-const MAX_FILE_SIZE = 200 * 1024 * 1024; // 200 مگابایت
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // ۵۰ مگابایت
 
 export default function UploadPage() {
   const router = useRouter();
@@ -163,7 +163,7 @@ export default function UploadPage() {
         .from('games')
         .getPublicUrl(coverPath);
 
-      // ۳. آپلود فایل بازی با TUS
+      // ۳. آپلود فایل بازی با TUS (اگر وجود داره)
       let filePath: string | null = null;
       let fileSize: number | null = null;
 
@@ -185,7 +185,7 @@ export default function UploadPage() {
 
         setUploadStage('در حال آپلود فایل بازی...');
 
-        // آپلود با TUS - endpoint مستقیم
+        // آپلود با TUS - endpoint مستقیم (بدون createSignedUploadUrl)
         await new Promise<void>((resolve, reject) => {
           const upload = new tus.Upload(gameFile, {
             endpoint: `https://${projectId}.storage.supabase.co/storage/v1/upload/resumable`,
