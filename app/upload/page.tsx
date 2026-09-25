@@ -9,6 +9,7 @@ import {
   Loader2,
   ImagePlus,
 } from 'lucide-react';
+import * as tus from 'tus-js-client';
 import { createClient } from '@/lib/supabase/client';
 import Navbar from '@/components/Navbar';
 import type { Platform } from '@/lib/types';
@@ -39,6 +40,8 @@ export default function UploadPage() {
   const [loading, setLoading] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [uploadStage, setUploadStage] = useState<string>('');
 
   const [title, setTitle] = useState('');
   const [titleEn, setTitleEn] = useState('');
@@ -84,18 +87,17 @@ export default function UploadPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setUploadProgress(null);
 
     // اعتبارسنجی
     if (!title.trim()) return setError('عنوان بازی الزامی است');
     if (platforms.length === 0) return setError('حداقل یک پلتفرم انتخاب کن');
     if (!coverFile) return setError('تصویر کاور الزامی است');
 
-    // اگر iOS انتخاب شده، لینک الزامی است
     if (platforms.includes('ios') && !storeUrl.trim()) {
       return setError('برای iOS، لینک App Store الزامی است');
     }
 
-    // اگر ویندوز یا اندروید انتخاب شده، فایل الزامی است
     const needsFile = platforms.includes('windows') || platforms.includes('android');
     if (needsFile && !gameFile) {
       return setError('برای ویندوز یا اندروید، فایل بازی الزامی است');
@@ -120,37 +122,84 @@ export default function UploadPage() {
       const slug = `${baseSlug}-${Math.random().toString(36).substring(2, 6)}`;
 
       // ۲. آپلود کاور
+      setUploadStage('آپلود تصویر کاور...');
+      setUploadProgress(0);
+
       const coverExt = coverFile.name.split('.').pop();
       const coverPath = `covers/${user.id}/${slug}.${coverExt}`;
 
       const { error: coverError } = await supabase.storage
         .from('games')
-        .upload(coverPath, coverFile);
-      if (coverError) throw coverError;
+        .upload(coverPath, coverFile, {
+          cacheControl: '3600',
+          upsert: false,
+        });
+
+      if (coverError) throw new Error('خطا در آپلود کاور: ' + coverError.message);
 
       const { data: coverData } = supabase.storage
         .from('games')
         .getPublicUrl(coverPath);
 
-      // ۳. آپلود فایل بازی (اگر وجود داره)
+      // ۳. آپلود فایل بازی با TUS (اگر وجود داره)
       let filePath: string | null = null;
       let fileSize: number | null = null;
 
       if (gameFile) {
+        setUploadStage('آماده‌سازی آپلود فایل بازی...');
+        setUploadProgress(0);
+
         const fileExt = gameFile.name.split('.').pop();
         filePath = `files/${user.id}/${slug}.${fileExt}`;
         fileSize = gameFile.size;
 
-        const { error: fileError } = await supabase.storage
+        // ساخت signed upload URL
+        const { data: uploadData, error: uploadError } = await supabase.storage
           .from('games')
-          .upload(filePath, gameFile, {
-            cacheControl: '3600',
-            upsert: false,
+          .createSignedUploadUrl(filePath);
+
+        if (uploadError || !uploadData) {
+          throw new Error('خطا در ساخت لینک آپلود: ' + (uploadError?.message || 'نامشخص'));
+        }
+
+        setUploadStage('در حال آپلود فایل بازی...');
+
+        // آپلود با TUS
+        await new Promise<void>((resolve, reject) => {
+          const upload = new tus.Upload(gameFile, {
+            uploadUrl: uploadData.signedUrl,
+            retryDelays: [0, 1000, 3000, 5000, 10000],
+            headers: {
+              'x-upsert': 'true',
+            },
+            metadata: {
+              bucketName: 'games',
+              objectName: filePath!,
+              contentType: gameFile.type || 'application/octet-stream',
+              cacheControl: '3600',
+            },
+            onError: (err) => {
+              console.error('TUS upload error:', err);
+              reject(new Error('خطا در آپلود فایل: ' + err.message));
+            },
+            onProgress: (bytesUploaded, bytesTotal) => {
+              const percentage = Math.round((bytesUploaded / bytesTotal) * 100);
+              setUploadProgress(percentage);
+            },
+            onSuccess: () => {
+              console.log('آپلود با موفقیت انجام شد');
+              resolve();
+            },
           });
-        if (fileError) throw fileError;
+
+          upload.start();
+        });
       }
 
       // ۴. درج در دیتابیس
+      setUploadStage('ذخیره اطلاعات...');
+      setUploadProgress(null);
+
       const { data: gameData, error: gameError } = await supabase
         .from('games')
         .insert({
@@ -167,7 +216,7 @@ export default function UploadPage() {
         .select()
         .single();
 
-      if (gameError) throw gameError;
+      if (gameError) throw new Error('خطا در ذخیره اطلاعات: ' + gameError.message);
 
       // ۵. درج نسخه‌های ویندوز/اندروید
       if (filePath) {
@@ -181,7 +230,7 @@ export default function UploadPage() {
             file_path: filePath,
             file_size: fileSize,
           });
-        if (versionError) throw versionError;
+        if (versionError) throw new Error('خطا در ذخیره نسخه: ' + versionError.message);
       }
 
       // ۶. درج نسخه iOS (لینک App Store)
@@ -194,13 +243,17 @@ export default function UploadPage() {
             version: '1.0.0',
             store_url: storeUrl.trim(),
           });
-        if (iosError) throw iosError;
+        if (iosError) throw new Error('خطا در ذخیره لینک iOS: ' + iosError.message);
       }
 
+      setUploadStage('انجام شد! در حال انتقال...');
       router.push('/dashboard');
       router.refresh();
     } catch (err: any) {
+      console.error('Upload error:', err);
       setError(err.message || 'خطا در آپلود');
+      setUploadProgress(null);
+      setUploadStage('');
     } finally {
       setLoading(false);
     }
@@ -243,6 +296,7 @@ export default function UploadPage() {
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               required
+              disabled={loading}
             />
           </Field>
 
@@ -254,6 +308,7 @@ export default function UploadPage() {
               value={titleEn}
               onChange={(e) => setTitleEn(e.target.value)}
               dir="ltr"
+              disabled={loading}
             />
           </Field>
 
@@ -265,6 +320,7 @@ export default function UploadPage() {
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               style={{ resize: 'vertical', fontFamily: 'inherit' }}
+              disabled={loading}
             />
           </Field>
 
@@ -274,6 +330,7 @@ export default function UploadPage() {
               value={category}
               onChange={(e) => setCategory(e.target.value)}
               style={{ cursor: 'pointer' }}
+              disabled={loading}
             >
               {CATEGORIES.map((c) => (
                 <option key={c.value} value={c.value} style={{ background: 'var(--surface)' }}>
@@ -291,10 +348,11 @@ export default function UploadPage() {
                   type="button"
                   onClick={() => togglePlatform(p.value)}
                   className={`badge badge-${p.value}`}
+                  disabled={loading}
                   style={{
                     padding: '0.6rem 1.2rem',
                     fontSize: '0.95rem',
-                    cursor: 'pointer',
+                    cursor: loading ? 'not-allowed' : 'pointer',
                     border: platforms.includes(p.value)
                       ? '2px solid currentColor'
                       : '2px solid transparent',
@@ -318,7 +376,7 @@ export default function UploadPage() {
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  cursor: 'pointer',
+                  cursor: loading ? 'not-allowed' : 'pointer',
                   overflow: 'hidden',
                   flexShrink: 0,
                   background: 'var(--background)',
@@ -338,19 +396,27 @@ export default function UploadPage() {
                   accept="image/*"
                   onChange={handleCoverChange}
                   style={{ display: 'none' }}
+                  disabled={loading}
                 />
               </label>
-              <div style={{ flex: 1, color: 'var(--text-muted)', fontSize: '0.9rem', paddingTop: '0.5rem' }}>
-                یک تصویر مربعی با کیفیت بالا انتخاب کن. این تصویر در لیست بازی‌ها نمایش داده می‌شود.
+              <div
+                style={{
+                  flex: 1,
+                  color: 'var(--text-muted)',
+                  fontSize: '0.9rem',
+                  paddingTop: '0.5rem',
+                }}
+              >
+                یک تصویر مربعی با کیفیت بالا انتخاب کن. این تصویر در لیست بازی‌ها نمایش داده
+                می‌شود.
               </div>
             </div>
           </Field>
 
-          {/* فایل بازی (فقط اگه ویندوز یا اندروید انتخاب شده) */}
           {(platforms.includes('windows') || platforms.includes('android')) && (
             <Field
               label="فایل بازی"
-              hint="حداکثر ۵۰۰ مگابایت - فرمت‌های مجاز: ZIP, APK, EXE, RAR, 7Z"
+              hint="فرمت‌های مجاز: ZIP, APK, EXE, RAR, 7Z"
               required
             >
               <label
@@ -361,7 +427,7 @@ export default function UploadPage() {
                   padding: '1rem 1.25rem',
                   border: '2px dashed var(--border)',
                   borderRadius: '0.75rem',
-                  cursor: 'pointer',
+                  cursor: loading ? 'not-allowed' : 'pointer',
                   background: 'var(--background)',
                 }}
               >
@@ -376,12 +442,21 @@ export default function UploadPage() {
                   accept=".zip,.apk,.exe,.rar,.7z"
                   onChange={(e) => setGameFile(e.target.files?.[0] || null)}
                   style={{ display: 'none' }}
+                  disabled={loading}
                 />
               </label>
+              <p
+                style={{
+                  color: 'var(--text-muted)',
+                  fontSize: '0.8rem',
+                  marginTop: '0.5rem',
+                }}
+              >
+                فایل‌های بزرگ به صورت خودکار تکه‌تکه آپلود می‌شوند و در صورت قطعی، ادامه پیدا می‌کنند.
+              </p>
             </Field>
           )}
 
-          {/* لینک App Store (فقط اگه iOS انتخاب شده) */}
           {platforms.includes('ios') && (
             <Field label="لینک App Store" hint="الزامی برای iOS" required>
               <input
@@ -391,11 +466,62 @@ export default function UploadPage() {
                 value={storeUrl}
                 onChange={(e) => setStoreUrl(e.target.value)}
                 dir="ltr"
+                disabled={loading}
               />
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: '0.5rem' }}>
-                اپل اجازه توزیع مستقیم فایل iOS رو نمی‌ده. بازی شما باید در App Store منتشر شده باشه و لینکش رو اینجا وارد کنی.
+              <p
+                style={{
+                  color: 'var(--text-muted)',
+                  fontSize: '0.8rem',
+                  marginTop: '0.5rem',
+                }}
+              >
+                اپل اجازه توزیع مستقیم فایل iOS رو نمی‌ده. بازی شما باید در App Store منتشر شده باشه.
               </p>
             </Field>
+          )}
+
+          {/* نمایش پیشرفت آپلود */}
+          {uploadProgress !== null && uploadStage && (
+            <div
+              style={{
+                background: 'var(--background)',
+                borderRadius: '0.75rem',
+                padding: '1rem',
+                marginBottom: '1rem',
+                border: '1px solid var(--border)',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  marginBottom: '0.5rem',
+                  fontSize: '0.9rem',
+                }}
+              >
+                <span>{uploadStage}</span>
+                <span style={{ color: 'var(--primary)', fontWeight: 600 }}>
+                  {uploadProgress}%
+                </span>
+              </div>
+              <div
+                style={{
+                  height: '8px',
+                  background: 'var(--surface)',
+                  borderRadius: '4px',
+                  overflow: 'hidden',
+                }}
+              >
+                <div
+                  style={{
+                    height: '100%',
+                    width: `${uploadProgress}%`,
+                    background: 'linear-gradient(90deg, var(--primary), #a855f7)',
+                    transition: 'width 0.3s ease',
+                  }}
+                />
+              </div>
+            </div>
           )}
 
           {error && (
