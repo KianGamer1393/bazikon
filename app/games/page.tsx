@@ -2,8 +2,8 @@ import { Suspense } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import Navbar from '@/components/Navbar';
-import { Gamepad2, Search, Download } from 'lucide-react';
-import type { Game } from '@/lib/types';
+import { Gamepad2, Search, Download, Star } from 'lucide-react';
+import type { Game, Platform } from '@/lib/types';
 
 async function GamesList({
   searchParams,
@@ -12,24 +12,20 @@ async function GamesList({
 }) {
   const supabase = await createClient();
 
-  // ساخت کوئری
   let query = supabase
     .from('games')
     .select('*')
     .eq('status', 'approved')
     .order('created_at', { ascending: false });
 
-  // فیلتر پلتفرم
   if (searchParams.platform) {
     query = query.contains('platform', [searchParams.platform]);
   }
 
-  // فیلتر دسته‌بندی
   if (searchParams.category) {
     query = query.eq('category', searchParams.category);
   }
 
-  // جستجو
   if (searchParams.q) {
     query = query.ilike('title', `%${searchParams.q}%`);
   }
@@ -65,20 +61,27 @@ async function GamesList({
       }}
     >
       {games.map((game) => (
-        <GameCard key={game.id} game={game} />
+        <GameCard key={game.id} game={game as Game} />
       ))}
     </div>
   );
 }
 
 function GameCard({ game }: { game: Game }) {
+  const platforms = (game.platform as Platform[]) || [];
+
+  const platformLabel = (p: Platform): string => {
+    if (p === 'windows') return 'ویندوز';
+    if (p === 'android') return 'اندروید';
+    return 'iOS';
+  };
+
   return (
     <Link
       href={`/games/${game.slug}`}
-      className="card"
+      className="card game-card"
       style={{ padding: 0, overflow: 'hidden', display: 'block' }}
     >
-      {/* کاور */}
       <div
         style={{
           aspectRatio: '1 / 1',
@@ -100,7 +103,6 @@ function GameCard({ game }: { game: Game }) {
         )}
       </div>
 
-      {/* اطلاعات */}
       <div style={{ padding: '0.85rem' }}>
         <h3
           style={{
@@ -122,13 +124,13 @@ function GameCard({ game }: { game: Game }) {
             marginBottom: '0.5rem',
           }}
         >
-          {game.platform.slice(0, 3).map((p) => (
+          {platforms.slice(0, 3).map((p) => (
             <span
               key={p}
               className={`badge badge-${p}`}
               style={{ fontSize: '0.7rem', padding: '0.15rem 0.5rem' }}
             >
-              {p === 'windows' ? 'ویندوز' : p === 'android' ? 'اندروید' : 'iOS'}
+              {platformLabel(p)}
             </span>
           ))}
         </div>
@@ -137,13 +139,38 @@ function GameCard({ game }: { game: Game }) {
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: '0.35rem',
-            color: 'var(--text-muted)',
-            fontSize: '0.8rem',
+            justifyContent: 'space-between',
+            gap: '0.5rem',
           }}
         >
-          <Download size={14} />
-          {game.downloads?.toLocaleString('fa-IR') || 0} دانلود
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.35rem',
+              color: 'var(--text-muted)',
+              fontSize: '0.8rem',
+            }}
+          >
+            <Download size={14} />
+            {game.downloads?.toLocaleString('fa-IR') || 0}
+          </div>
+
+          {game.review_count > 0 && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.25rem',
+                fontSize: '0.8rem',
+              }}
+            >
+              <Star size={12} fill="#f59e0b" color="#f59e0b" />
+              <span style={{ color: 'var(--text-muted)' }}>
+                {Number(game.avg_rating).toFixed(1)}
+              </span>
+            </div>
+          )}
         </div>
       </div>
     </Link>

@@ -2,23 +2,22 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { Gamepad2, Search, User, LogOut, Upload } from 'lucide-react';
+import { Gamepad2, User, LogOut, Upload, Menu, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
 
 export default function Navbar() {
   const [user, setUser] = useState<SupabaseUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [menuOpen, setMenuOpen] = useState(false);
   const supabase = createClient();
 
   useEffect(() => {
-    // گرفتن کاربر فعلی
     supabase.auth.getUser().then(({ data: { user } }) => {
       setUser(user);
       setLoading(false);
     });
 
-    // گوش دادن به تغییرات احراز هویت
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -53,7 +52,6 @@ export default function Navbar() {
             height: '4rem',
           }}
         >
-          {/* لوگو */}
           <Link
             href="/"
             style={{
@@ -69,62 +67,38 @@ export default function Navbar() {
             <span>بازیکن</span>
           </Link>
 
-          {/* لینک‌های میانی */}
-          <div style={{ display: 'flex', gap: '2rem' }}>
-            <Link
-              href="/games"
-              style={{ color: 'var(--text-muted)', fontWeight: 500 }}
-            >
+          {/* لینک‌های دسکتاپ */}
+          <div className="hide-mobile" style={{ display: 'flex', gap: '2rem' }}>
+            <Link href="/games" style={{ color: 'var(--text-muted)', fontWeight: 500 }}>
               بازی‌ها
             </Link>
-            <Link
-              href="/games?platform=windows"
-              style={{ color: 'var(--text-muted)', fontWeight: 500 }}
-            >
+            <Link href="/games?platform=windows" style={{ color: 'var(--text-muted)', fontWeight: 500 }}>
               ویندوز
             </Link>
-            <Link
-              href="/games?platform=android"
-              style={{ color: 'var(--text-muted)', fontWeight: 500 }}
-            >
+            <Link href="/games?platform=android" style={{ color: 'var(--text-muted)', fontWeight: 500 }}>
               اندروید
             </Link>
-            <Link
-              href="/games?platform=ios"
-              style={{ color: 'var(--text-muted)', fontWeight: 500 }}
-            >
+            <Link href="/games?platform=ios" style={{ color: 'var(--text-muted)', fontWeight: 500 }}>
               iOS
             </Link>
           </div>
 
-          {/* بخش کاربر */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          {/* بخش کاربر - دسکتاپ */}
+          <div className="hide-mobile" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
             {loading ? (
-              <div
-                style={{
-                  width: '100px',
-                  height: '40px',
-                  background: 'var(--surface)',
-                  borderRadius: '0.75rem',
-                }}
-              />
+              <div style={{ width: '100px', height: '40px', background: 'var(--surface)', borderRadius: '0.75rem' }} />
             ) : user ? (
               <>
                 <Link href="/upload" className="btn-secondary" style={{ padding: '0.5rem 1rem' }}>
-                  <Upload size={18} style={{ display: 'inline', marginLeft: '0.5rem' }} />
-                  آپلود بازی
+                  <Upload size={18} style={{ display: 'inline', marginLeft: '0.5rem', verticalAlign: 'middle' }} />
+                  آپلود
                 </Link>
                 <Link href="/dashboard" style={{ color: 'var(--text-muted)' }}>
                   <User size={22} />
                 </Link>
                 <button
                   onClick={handleLogout}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: 'var(--text-muted)',
-                    cursor: 'pointer',
-                  }}
+                  style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
                   title="خروج"
                 >
                   <LogOut size={22} />
@@ -141,7 +115,71 @@ export default function Navbar() {
               </>
             )}
           </div>
+
+          {/* دکمه منو - موبایل */}
+          <button
+            onClick={() => setMenuOpen(!menuOpen)}
+            style={{
+              display: 'none',
+              background: 'none',
+              border: 'none',
+              color: 'var(--text)',
+              cursor: 'pointer',
+              padding: '0.5rem',
+            }}
+            className="show-mobile"
+          >
+            {menuOpen ? <X size={24} /> : <Menu size={24} />}
+          </button>
         </div>
+
+        {/* منوی موبایل */}
+        {menuOpen && (
+          <div
+            className="show-mobile"
+            style={{
+              paddingBottom: '1rem',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.75rem',
+            }}
+          >
+            <Link href="/games" style={{ color: 'var(--text-muted)', padding: '0.5rem 0' }} onClick={() => setMenuOpen(false)}>
+              بازی‌ها
+            </Link>
+            <Link href="/games?platform=windows" style={{ color: 'var(--text-muted)', padding: '0.5rem 0' }} onClick={() => setMenuOpen(false)}>
+              ویندوز
+            </Link>
+            <Link href="/games?platform=android" style={{ color: 'var(--text-muted)', padding: '0.5rem 0' }} onClick={() => setMenuOpen(false)}>
+              اندروید
+            </Link>
+            <Link href="/games?platform=ios" style={{ color: 'var(--text-muted)', padding: '0.5rem 0' }} onClick={() => setMenuOpen(false)}>
+              iOS
+            </Link>
+            {user ? (
+              <>
+                <Link href="/upload" className="btn-secondary" onClick={() => setMenuOpen(false)}>
+                  آپلود بازی
+                </Link>
+                <Link href="/dashboard" className="btn-secondary" onClick={() => setMenuOpen(false)}>
+                  داشبورد
+                </Link>
+                <button onClick={handleLogout} className="btn-secondary" style={{ textAlign: 'right' }}>
+                  خروج
+                </button>
+              </>
+            ) : (
+              <>
+                <Link href="/login" className="btn-secondary" onClick={() => setMenuOpen(false)}>
+                  ورود
+                </Link>
+                <Link href="/login?mode=signup" className="btn-primary" onClick={() => setMenuOpen(false)}>
+                  ثبت‌نام
+                </Link>
+              </>
+            )}
+          </div>
+        )}
       </div>
     </nav>
   );

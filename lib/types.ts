@@ -15,6 +15,8 @@ export interface Game {
   downloads: number;
   created_at: string;
   updated_at: string;
+  avg_rating: number;
+  review_count: number;
 }
 
 export interface GameVersion {
@@ -34,4 +36,18 @@ export interface AdminCode {
   expires_at: string;
   used: boolean;
   created_at: string;
+}
+
+export interface Review {
+  id: string;
+  game_id: string;
+  user_id: string;
+  rating: number;
+  comment: string | null;
+  created_at: string;
+}
+
+export interface ReviewWithUser extends Review {
+  user_email?: string;
+  user_name?: string;
 }

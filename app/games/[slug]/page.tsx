@@ -3,6 +3,8 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import Navbar from '@/components/Navbar';
 import DownloadButton from '@/components/DownloadButton';
+import ReviewsSection from '@/components/ReviewsSection';
+import StarRating from '@/components/StarRating';
 import { Gamepad2, Download, Calendar, Tag, ArrowRight } from 'lucide-react';
 import type { Platform } from '@/lib/types';
 
@@ -13,6 +15,11 @@ export default async function GameDetailPage({
 }) {
   const { slug } = await params;
   const supabase = await createClient();
+
+  // کاربر فعلی (برای بخش نظرات)
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   const { data: game, error } = await supabase
     .from('games')
@@ -25,7 +32,6 @@ export default async function GameDetailPage({
     notFound();
   }
 
-  // گرفتن نسخه‌ها
   const { data: versions } = await supabase
     .from('game_versions')
     .select('*')
@@ -42,6 +48,8 @@ export default async function GameDetailPage({
     if (p === 'android') return 'اندروید';
     return 'iOS';
   };
+
+  const platforms = (game.platform as Platform[]) || [];
 
   return (
     <>
@@ -134,10 +142,10 @@ export default async function GameDetailPage({
                   display: 'flex',
                   gap: '0.5rem',
                   flexWrap: 'wrap',
-                  marginBottom: '1.5rem',
+                  marginBottom: '1rem',
                 }}
               >
-                {(game.platform as Platform[]).map((p) => (
+                {platforms.map((p) => (
                   <span
                     key={p}
                     className={`badge badge-${p}`}
@@ -147,6 +155,23 @@ export default async function GameDetailPage({
                   </span>
                 ))}
               </div>
+
+              {/* امتیاز */}
+              {game.review_count > 0 && (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    marginBottom: '1rem',
+                  }}
+                >
+                  <StarRating value={Number(game.avg_rating)} size={18} readonly />
+                  <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                    {Number(game.avg_rating).toFixed(1)} ({game.review_count} نظر)
+                  </span>
+                </div>
+              )}
 
               <div
                 style={{
@@ -174,11 +199,10 @@ export default async function GameDetailPage({
                 )}
               </div>
 
-              {/* دکمه دانلود */}
               <DownloadButton
                 gameId={game.id}
                 versions={versions || []}
-                platforms={game.platform as Platform[]}
+                platforms={platforms}
               />
             </div>
           </div>
@@ -199,6 +223,9 @@ export default async function GameDetailPage({
             </p>
           </div>
         )}
+
+        {/* نظرات */}
+        <ReviewsSection gameId={game.id} currentUserId={user?.id} />
       </main>
     </>
   );
