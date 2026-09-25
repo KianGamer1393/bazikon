@@ -33,7 +33,7 @@ const PLATFORMS: { value: Platform; label: string }[] = [
   { value: 'ios', label: 'iOS' },
 ];
 
-const MAX_FILE_SIZE = 50 * 1024 * 1024; // ۵۰ مگابایت
+const MAX_FILE_SIZE = 200 * 1024 * 1024; // ۵۰ مگابایت
 
 export default function UploadPage() {
   const router = useRouter();
